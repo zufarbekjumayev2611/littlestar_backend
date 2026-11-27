@@ -1,0 +1,41 @@
+# Render Blueprint: Render panelida "New → Blueprint" orqali shu repo tanlansa, sozlamalar avtomatik olinadi.
+# Qiymati bo'sh (sync: false) o'zgaruvchilarni Render o'zi so'raydi — ular faqat Render'da saqlanadi, GitHub'da emas.
+services:
+  - type: web
+    name: littlestar-api
+    runtime: node
+    plan: starter            # yuklangan fayllar uchun doimiy disk faqat pullik rejada bor
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: uploads
+      mountPath: /var/data
+      sizeGB: 5
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: UPLOAD_DIR
+        value: /var/data/uploads
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: PUBLIC_URL
+        sync: false
+      - key: SITE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PAYME_MERCHANT_ID
+        sync: false
+      - key: PAYME_KEY
+        sync: false
+      - key: PAYME_TEST
+        value: "1"
+      - key: CLICK_SERVICE_ID
+        sync: false
+      - key: CLICK_MERCHANT_ID
+        sync: false
+      - key: CLICK_SECRET_KEY
+        sync: false

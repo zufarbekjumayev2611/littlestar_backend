@@ -55,7 +55,23 @@ npm run create-admin -- 998901234567 KuchliParol   # birinchi admin
 
 > ⚠️ `.env` fayli `.gitignore` da turibdi va GitHub’ga **chiqmaydi**. Kalitlarni hech qachon kodga, GitHub’ga yoki chatga yozmang.
 
-## 4. Serverga (VPS) o‘rnatish
+## 4a. Render’ga joylash (tavsiya)
+| Render maydoni | Qiymat |
+|---|---|
+| Runtime / Language | **Node** |
+| Build Command | `npm ci` |
+| Start Command | `npm start` |
+| Health Check Path | `/api/health` |
+
+**Environment** bo‘limiga `.env.example` dagi o‘zgaruvchilarni kiriting: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `PUBLIC_URL`, `SITE_URL`, `CORS_ORIGINS`, kerak bo‘lsa `PAYME_*` va `CLICK_*`. Bundan tashqari `NODE_VERSION=22` qo‘shing. `PORT`ni **yozmang**, uni Render o‘zi beradi. Serverda `.env` fayli kerak emas.
+
+**Yuklangan fayllar uchun disk:** Render’da server qayta ishga tushganda oddiy fayl tizimi tozalanadi. O‘qituvchi yuklagan video va o‘quvchilar topshirgan rasmlar yo‘qolmasligi uchun **Disk** qo‘shing (pullik rejada mavjud): Mount Path `/var/data`, so‘ng `UPLOAD_DIR=/var/data/uploads`. Baza Turso’da bo‘lgani uchun unga ta’sir qilmaydi.
+
+**Birinchi admin:** kompyuteringizda shu repoda `.env` ga Turso manzil va tokenini yozib, `npm install` va `npm run create-admin -- 998XXXXXXXXX KuchliParol` buyruqlarini bering. Baza umumiy (Turso), shuning uchun admin Render’dagi saytda ham ishlaydi. Render’ning Shell bo‘limi orqali ham shu buyruqni berish mumkin.
+
+`render.yaml` fayli bor, shuning uchun “New → Blueprint” orqali ulasangiz, bu sozlamalar avtomatik olinadi.
+
+## 4b. Serverga (VPS) o‘rnatish
 Fayllar diskka yoziladi, shuning uchun API doimiy diskli serverda ishlashi kerak (VPS, Railway volume, Render disk va h.k.). Ubuntu VPS misolida:
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs nginx
