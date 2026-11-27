@@ -16,7 +16,6 @@ const ROOT = path.resolve(__dirname, "..");
 const PORT = +(process.env.PORT || 3000);
 const DB_URL = process.env.TURSO_DATABASE_URL || "file:" + path.join(ROOT, "data", "littlestar.db");
 if (DB_URL.startsWith("file:")) require("node:fs").mkdirSync(path.dirname(DB_URL.slice(5)), { recursive: true });
-const UPLOAD_DIR = path.resolve(ROOT, process.env.UPLOAD_DIR || "data/uploads");
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, ""); // backend manzili, masalan https://api.littlestar.uz
 // Frontend joylashgan domen(lar). Vergul bilan: https://littlestar.uz,https://www.littlestar.uz  ("*" — hammaga ruxsat)
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || "*").split(",").map((s) => s.trim().replace(/\/$/, "")).filter(Boolean);
@@ -67,7 +66,7 @@ async function newSession(accountId) {
   return token;
 }
 function publicAccount(a) {
-  return { id: a.id, phone: a.phone, parent_name: a.parent_name, role: a.role, premium_until: a.premium_until };
+  return { id: a.id, phone: a.phone, email: a.email || null, parent_name: a.parent_name, role: a.role, premium_until: a.premium_until };
 }
 function hasAccess(s, account, section) {
   if (s.free_mode) return true;
@@ -130,10 +129,13 @@ route("POST", "/api/auth/register", async ({ body, ip }) => {
   const a = await db.get("SELECT * FROM accounts WHERE id=?", r.lastInsertRowid);
   return { token: await newSession(a.id), account: publicAccount(a) };
 });
+// Kirish: telefon raqam yoki email (admin email bilan kiradi)
 route("POST", "/api/auth/login", async ({ body, ip }) => {
-  const phone = normPhone(body.phone);
-  rateLimit("login:" + ip + ":" + phone, 10); rateLimit("loginip:" + ip, 300);
-  const a = phone && await db.get("SELECT * FROM accounts WHERE phone=?", phone);
+  const login = String(body.phone || body.login || "").trim();
+  const email = login.includes("@") ? login.toLowerCase() : null;
+  const phone = email ? null : normPhone(login);
+  rateLimit("login:" + ip + ":" + (email || phone), 10); rateLimit("loginip:" + ip, 300); rateLimit("loginacc:" + (email || phone), 30, 3600);
+  const a = email ? await db.get("SELECT * FROM accounts WHERE email=?", email) : phone && await db.get("SELECT * FROM accounts WHERE phone=?", phone);
   if (!a || hashPass(String(body.password || ""), a.salt) !== a.pass_hash) throw new HttpError(401, "Telefon raqam yoki parol noto‘g‘ri");
   return { token: await newSession(a.id), account: publicAccount(a) };
 });
@@ -320,11 +322,11 @@ route("PUT", "/api/admin/tests/:id/questions", async ({ body, params }) => {
 
 route("GET", "/api/admin/users", ({ query }) => {
   const q = "%" + String(query.q || "").replace(/[%_]/g, "") + "%";
-  return db.all(`SELECT a.id,a.phone,a.parent_name,a.role,a.premium_until,a.created_at,
+  return db.all(`SELECT a.id,a.phone,a.email,a.parent_name,a.role,a.premium_until,a.created_at,
       (SELECT GROUP_CONCAT(c.name || ' (' || c.grade || '-sinf, ' || c.region || ')', '; ') FROM children c WHERE c.account_id=a.id) kids,
       (SELECT COUNT(*) FROM attempts t JOIN children c ON c.id=t.child_id WHERE c.account_id=a.id AND t.status='done') attempts
-    FROM accounts a WHERE a.phone LIKE ? OR a.parent_name LIKE ? OR EXISTS(SELECT 1 FROM children c WHERE c.account_id=a.id AND c.name LIKE ?)
-    ORDER BY a.id DESC LIMIT 200`, q, q, q);
+    FROM accounts a WHERE a.phone LIKE ? OR a.email LIKE ? OR a.parent_name LIKE ? OR EXISTS(SELECT 1 FROM children c WHERE c.account_id=a.id AND c.name LIKE ?)
+    ORDER BY a.id DESC LIMIT 200`, q, q, q, q);
 }, A);
 route("PUT", "/api/admin/users/:id", async ({ body, params, account }) => {
   const id = +params.id; const u = await db.get("SELECT * FROM accounts WHERE id=?", id); if (!u) throw new HttpError(404, "Topilmadi");
@@ -339,7 +341,7 @@ route("PUT", "/api/admin/users/:id", async ({ body, params, account }) => {
 }, A);
 
 /* ======================= OLIMPIADA AKADEMIYASI ======================= */
-const ACADEMY = require("./academy.js")({ db, route, HttpError, bad, str, now, UPLOAD_DIR, PUBLIC_URL });
+const ACADEMY = require("./academy.js")({ db, route, HttpError, bad, str, now, PUBLIC_URL });
 
 /* ======================= HTTP SERVER ======================= */
 function readBody(req) {
@@ -396,14 +398,41 @@ const server = http.createServer(async (req, res) => {
 });
 
 /* ======================= ISHGA TUSHIRISH ======================= */
+// Admin akkaunti Environment’dagi ADMIN_EMAIL va ADMIN_PASSWORD dan yaratiladi (parol kodda/GitHub’da saqlanmaydi).
+// Parol o‘zgartirilsa, keyingi ishga tushishda yangilanadi.
+async function ensureAdmin() {
+  const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const pass = String(process.env.ADMIN_PASSWORD || "");
+  if (!email || !pass) return;
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { console.warn("ADMIN_EMAIL noto‘g‘ri:", email); return; }
+  const ex = await db.get("SELECT * FROM accounts WHERE email=?", email);
+  if (ex) {
+    if (ex.role !== "admin" || hashPass(pass, ex.salt) !== ex.pass_hash) {
+      const salt = crypto.randomBytes(16).toString("hex");
+      await db.batch([["UPDATE accounts SET role='admin', pass_hash=?, salt=? WHERE id=?", hashPass(pass, salt), salt, ex.id], ["DELETE FROM sessions WHERE account_id=?", ex.id]]);
+      console.log("Admin yangilandi:", email);
+    }
+    return;
+  }
+  const salt = crypto.randomBytes(16).toString("hex");
+  const ins = (phone) => db.run("INSERT INTO accounts(phone,email,pass_hash,salt,parent_name,role,created_at) VALUES(?,?,?,?,?,?,?)", phone, email, hashPass(pass, salt), salt, "Admin", "admin", now());
+  // Eski bazada telefon majburiy bo‘lsa, telefon o‘rniga belgi qo‘yiladi (kirish email orqali)
+  try { await ins(null); } catch (e) { if (!/NOT NULL/i.test(e.message)) throw e; await ins("admin:" + email); }
+  console.log("Admin yaratildi:", email);
+}
+
 async function init() {
   await db.exec(SCHEMA);
+  // Eski bazada email ustuni bo‘lmasa, qo‘shiladi
+  if (!(await db.all("PRAGMA table_info(accounts)")).some((c) => c.name === "email")) await db.run("ALTER TABLE accounts ADD COLUMN email TEXT");
+  await db.run("CREATE UNIQUE INDEX IF NOT EXISTS idx_accounts_email ON accounts(email)");
   await db.batch(Object.entries(DEFAULT_SETTINGS).map(([k, v]) => ["INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)", k, v]));
   if ((await db.get("SELECT COUNT(*) n FROM tests")).n === 0) {
     await require("./seed.js").seed(db);
     console.log("Namunaviy testlar qo‘shildi.");
   }
   await ACADEMY.init();
+  await ensureAdmin();
 }
 
 async function main() {

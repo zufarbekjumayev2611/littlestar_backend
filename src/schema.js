@@ -4,7 +4,7 @@
 "use strict";
 module.exports = `
 CREATE TABLE IF NOT EXISTS accounts(
-  id INTEGER PRIMARY KEY, phone TEXT UNIQUE NOT NULL, pass_hash TEXT NOT NULL, salt TEXT NOT NULL,
+  id INTEGER PRIMARY KEY, phone TEXT UNIQUE, email TEXT, pass_hash TEXT NOT NULL, salt TEXT NOT NULL,
   parent_name TEXT DEFAULT '', role TEXT NOT NULL DEFAULT 'user', premium_until INTEGER DEFAULT 0,
   created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions(
@@ -49,6 +49,8 @@ CREATE INDEX IF NOT EXISTS idx_lessons_course ON lessons(course_id, starts_at);
 CREATE TABLE IF NOT EXISTS files(
   id INTEGER PRIMARY KEY, key TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
   account_id INTEGER, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS file_chunks(
+  file_id INTEGER NOT NULL, idx INTEGER NOT NULL, data BLOB NOT NULL, PRIMARY KEY(file_id, idx));
 CREATE TABLE IF NOT EXISTS lesson_items(
   id INTEGER PRIMARY KEY, lesson_id INTEGER NOT NULL, kind TEXT NOT NULL, title TEXT DEFAULT '',
   file_id INTEGER, url TEXT DEFAULT '', ord INTEGER DEFAULT 0);

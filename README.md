@@ -5,8 +5,7 @@ Frontend (sayt) alohida repoda: [`littlestar`](https://github.com/zufarbekjumaye
 
 ```
  Sayt (littlestar.uz)  ──HTTPS──►  API (api.littlestar.uz, shu repo)  ──►  Turso (ma’lumotlar bazasi)
-                                          │
-                                          └──►  data/uploads/  (video, rasm, PDF fayllar)
+                                          (yuklangan fayllar ham Turso’da saqlanadi)
 ```
 
 - **Node.js 20.12+**, bitta tashqi kutubxona: [`@libsql/client`](https://www.npmjs.com/package/@libsql/client) (Turso).
@@ -20,7 +19,8 @@ Frontend (sayt) alohida repoda: [`littlestar`](https://github.com/zufarbekjumaye
 | `src/schema.js` | Ma’lumotlar bazasi jadvallari |
 | `src/db.js` | Turso bilan ishlash (so‘rovlar va tranzaksiyalar) |
 | `src/seed.js` | Namunaviy test variantlari |
-| `deploy/` | systemd xizmati, Nginx sozlamasi, fayllar zaxirasi skripti |
+| `deploy/` | VPS uchun systemd xizmati va Nginx sozlamasi |
+| `render.yaml` | Render sozlamalari (Blueprint) |
 | `.env.example` | Barcha sozlamalar ro‘yxati (namuna) |
 
 ## 1. Turso bazasini tayyorlash
@@ -49,30 +49,38 @@ npm run create-admin -- 998901234567 KuchliParol   # birinchi admin
 | `PUBLIC_URL` | API’ning internetdagi manzili, masalan `https://api.littlestar.uz`. Yuklangan fayl havolalari shu bilan boshlanadi |
 | `SITE_URL` | Sayt manzili, masalan `https://littlestar.uz`. To‘lovdan keyin o‘quvchi shu manzilga qaytadi |
 | `CORS_ORIGINS` | API’ga murojaat qilishiga ruxsat berilgan saytlar, vergul bilan ajratiladi: `https://littlestar.uz,https://www.littlestar.uz` |
-| `UPLOAD_DIR` | Yuklangan fayllar papkasi (standart `data/uploads`) |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Admin akkaunti. Server ishga tushganda yaratiladi yoki yangilanadi. Admin panelga shu email va parol bilan kiriladi |
+| `MAX_UPLOAD_MB` | O‘qituvchi yuklaydigan eng katta fayl hajmi, MB (standart 100) |
 | `PAYME_MERCHANT_ID`, `PAYME_KEY`, `PAYME_TEST` | Payme. Sinovda `PAYME_TEST=1`, haqiqiy to‘lovda `0` |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | Click |
 
 > ⚠️ `.env` fayli `.gitignore` da turibdi va GitHub’ga **chiqmaydi**. Kalitlarni hech qachon kodga, GitHub’ga yoki chatga yozmang.
 
 ## 4a. Render’ga joylash (tavsiya)
+Render’da **Web Service** tanlanadi. Background Worker emas, chunki u tashqaridan keladigan so‘rovlarni qabul qilmaydi.
+
 | Render maydoni | Qiymat |
 |---|---|
-| Runtime / Language | **Node** |
-| Build Command | `npm ci` |
+| Language | **Node** |
+| Build Command | `npm ci` — `package.json` dagi kutubxonalarni o‘rnatadi (Python’dagi `pip install -r requirements.txt` ning o‘rnini bosadi) |
 | Start Command | `npm start` |
 | Health Check Path | `/api/health` |
 
-**Environment** bo‘limiga `.env.example` dagi o‘zgaruvchilarni kiriting: `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, `PUBLIC_URL`, `SITE_URL`, `CORS_ORIGINS`, kerak bo‘lsa `PAYME_*` va `CLICK_*`. Bundan tashqari `NODE_VERSION=22` qo‘shing. `PORT`ni **yozmang**, uni Render o‘zi beradi. Serverda `.env` fayli kerak emas.
+**Environment** bo‘limiga quyidagilarni kiriting:
+- `NODE_VERSION=22`
+- `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
+- `ADMIN_EMAIL`, `ADMIN_PASSWORD`
+- `PUBLIC_URL`, `SITE_URL`, `CORS_ORIGINS`
+- kerak bo‘lsa `PAYME_*` va `CLICK_*`
 
-**Yuklangan fayllar uchun disk:** Render’da server qayta ishga tushganda oddiy fayl tizimi tozalanadi. O‘qituvchi yuklagan video va o‘quvchilar topshirgan rasmlar yo‘qolmasligi uchun **Disk** qo‘shing (pullik rejada mavjud): Mount Path `/var/data`, so‘ng `UPLOAD_DIR=/var/data/uploads`. Baza Turso’da bo‘lgani uchun unga ta’sir qilmaydi.
+`PORT`ni **yozmang**, uni Render o‘zi beradi. Serverda `.env` fayli kerak emas.
 
-**Birinchi admin:** kompyuteringizda shu repoda `.env` ga Turso manzil va tokenini yozib, `npm install` va `npm run create-admin -- 998XXXXXXXXX KuchliParol` buyruqlarini bering. Baza umumiy (Turso), shuning uchun admin Render’dagi saytda ham ishlaydi. Render’ning Shell bo‘limi orqali ham shu buyruqni berish mumkin.
+Fayllar Turso’da saqlanadi, shuning uchun **disk kerak emas** va bepul rejada ham fayllar yo‘qolmaydi. Bepul reja 15 daqiqa so‘rov bo‘lmasa uxlab qoladi. Payme yoki Click ulangach, pullik rejaga o‘ting, aks holda ularning so‘rovlari javobsiz qolishi mumkin.
 
-`render.yaml` fayli bor, shuning uchun “New → Blueprint” orqali ulasangiz, bu sozlamalar avtomatik olinadi.
+`render.yaml` bor, shuning uchun “New → Blueprint” orqali ulasangiz, bu sozlamalar avtomatik olinadi.
 
 ## 4b. Serverga (VPS) o‘rnatish
-Fayllar diskka yoziladi, shuning uchun API doimiy diskli serverda ishlashi kerak (VPS, Railway volume, Render disk va h.k.). Ubuntu VPS misolida:
+Ubuntu VPS misolida:
 ```bash
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt install -y nodejs nginx
 sudo useradd -r -s /usr/sbin/nologin littlestar
@@ -80,7 +88,6 @@ sudo git clone https://github.com/zufarbekjumayev2611/littlestar_backend /opt/li
 cd /opt/littlestar-backend && sudo npm ci --omit=dev
 sudo cp .env.example .env && sudo nano .env && sudo chmod 600 .env
 sudo chown -R littlestar /opt/littlestar-backend
-sudo -u littlestar npm run create-admin -- 998XXXXXXXXX KuchliParol
 sudo cp deploy/littlestar-api.service /etc/systemd/system/ && sudo systemctl enable --now littlestar-api
 sudo cp deploy/nginx-api.conf /etc/nginx/sites-available/littlestar-api
 sudo ln -s /etc/nginx/sites-available/littlestar-api /etc/nginx/sites-enabled/ && sudo nginx -t && sudo systemctl reload nginx
@@ -89,7 +96,7 @@ sudo certbot --nginx -d api.littlestar.uz
 DNS: `api.littlestar.uz` uchun A-yozuvni VPS IP manziliga yo‘naltiring. Tekshirish uchun `https://api.littlestar.uz/api/health` manzili `{"ok":true}` qaytarishi kerak.
 
 **Yangilash:** `git pull && npm ci --omit=dev && sudo systemctl restart littlestar-api`.
-**Zaxira:** bazani Turso o‘zi saqlaydi. Yuklangan fayllar uchun `deploy/backup-uploads.sh` skriptini cron’ga qo‘shing.
+**Zaxira:** baza va yuklangan fayllar Turso’da turadi, ularning zaxirasini Turso o‘zi saqlaydi.
 
 ## 5. To‘lov tizimi (Payme va Click)
 O‘quvchi saytda “To‘lash” tugmasini bosadi va Payme yoki Click sahifasiga o‘tadi. To‘lov tasdiqlangach, server o‘quvchini kursga **avtomatik** qo‘shadi.

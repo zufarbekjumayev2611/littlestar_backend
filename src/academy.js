@@ -2,12 +2,9 @@
 // Darslar jadvali, jonli dars (video konferensiya havolasi), video yechimlar, materiallar,
 // uyga vazifa topshirish va tekshirish, savol-javob, davomat, jurnal, to‘lov (Payme, Click).
 "use strict";
-const fs = require("node:fs");
-const path = require("node:path");
 const crypto = require("node:crypto");
 
-module.exports = function academy({ db, route, HttpError, bad, str, now, UPLOAD_DIR, PUBLIC_URL }) {
-  fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+module.exports = function academy({ db, route, HttpError, bad, str, now, PUBLIC_URL }) {
 
   // Birinchi ishga tushishda: Al-Xorazmiy olimpiadasi va uning 7–8-sinflar uchun kursi
   async function init() {
@@ -96,48 +93,54 @@ module.exports = function academy({ db, route, HttpError, bad, str, now, UPLOAD_
     [`DELETE FROM lessons WHERE ${where}`, ...a],
   ];
 
-  /* ---------------- fayl yuklash (oqim bilan, JSON emas) ---------------- */
-  // Fayllar serverning diskida (UPLOAD_DIR) saqlanadi, bazada faqat ularning ma’lumoti turadi.
+  /* ---------------- fayl yuklash: fayllar Turso bazasida saqlanadi ---------------- */
+  // Fayl 512 KB lik bo‘laklarga (file_chunks) bo‘linib yoziladi. Shuning uchun serverga disk kerak emas
+  // (Render’ning bepul rejasida ham fayllar yo‘qolmaydi). Katta videolar uchun YouTube havolasi tavsiya etiladi.
+  const CHUNK = 512 * 1024;
+  const MAX_TEACHER = (+process.env.MAX_UPLOAD_MB || 100) * 1024 * 1024;
+  const MAX_STUDENT = 25 * 1024 * 1024;
   const MEDIA_INLINE = /^(image\/(png|jpe?g|gif|webp)|video\/(mp4|webm|ogg|quicktime)|audio\/(mpeg|mp4|ogg|wav|webm)|application\/pdf)$/;
-  route("POST", "/api/upload", ({ req, account, query }) => new Promise((resolve, reject) => {
+  const mb = (n) => Math.round(n / 1024 / 1024);
+  route("POST", "/api/upload", async ({ req, account, query }) => {
     const teacher = isTeacher(account);
-    const max = teacher ? 2 * 1024 ** 3 : 25 * 1024 ** 2;
+    const max = teacher ? MAX_TEACHER : MAX_STUDENT;
     const name = str(query.name || "fayl", 150).replace(/[\\/\0]/g, "_") || "fayl";
     let mime = String(req.headers["content-type"] || "application/octet-stream").split(";")[0].trim().toLowerCase();
-    if (!teacher && !/^(image\/(png|jpe?g|gif|webp|heic|heif)|application\/pdf)$/.test(mime))
-      return reject(new HttpError(400, "Faqat rasm (JPG, PNG) yoki PDF yuklash mumkin"));
+    if (!teacher && !/^(image\/(png|jpe?g|gif|webp|heic|heif)|application\/pdf)$/.test(mime)) throw new HttpError(400, "Faqat rasm (JPG, PNG) yoki PDF yuklash mumkin");
     if (!/^[\w.+-]+\/[\w.+-]+$/.test(mime)) mime = "application/octet-stream";
-    const len = +req.headers["content-length"] || 0;
-    if (len > max) return reject(new HttpError(413, `Fayl juda katta (ko‘pi bilan ${Math.round(max / 1024 ** 2)} MB)`));
+    const tooBig = () => new HttpError(413, `Fayl juda katta (ko‘pi bilan ${mb(max)} MB).${teacher ? " Katta videoni YouTube’ga “Ro‘yxatda yo‘q” qilib joylab, havolasini qo‘ying." : ""}`);
+    if ((+req.headers["content-length"] || 0) > max) { req.resume(); throw tooBig(); }
     const key = crypto.randomBytes(18).toString("hex");
-    const tmp = path.join(UPLOAD_DIR, "tmp-" + key);
-    const out = fs.createWriteStream(tmp);
-    let size = 0, failed = false;
-    const fail = (e) => { if (failed) return; failed = true; out.destroy(); fs.rm(tmp, { force: true }, () => {}); reject(e); };
-    req.on("data", (c) => { size += c.length; if (size > max) { fail(new HttpError(413, "Fayl juda katta")); req.destroy(); } });
-    req.on("error", fail); out.on("error", fail);
-    req.pipe(out);
-    out.on("finish", async () => {
-      if (failed) return;
-      if (!size) { fs.rm(tmp, { force: true }, () => {}); return reject(new HttpError(400, "Fayl bo‘sh")); }
-      try {
-        const r = await db.run("INSERT INTO files(key,name,mime,size,account_id,created_at) VALUES(?,?,?,?,?,?)", key, name, mime, size, account.id, now());
-        fs.renameSync(tmp, path.join(UPLOAD_DIR, `${r.lastInsertRowid}-${key}`));
-        resolve(pubFile({ id: r.lastInsertRowid, key, name, mime, size }));
-      } catch (e) { fs.rm(tmp, { force: true }, () => {}); reject(e); }
-    });
-  }), { auth: true, raw: true });
+    const fid = (await db.run("INSERT INTO files(key,name,mime,size,account_id,created_at) VALUES(?,?,?,0,?,?)", key, name, mime, account.id, now())).lastInsertRowid;
+    let size = 0, idx = 0, buf = [], bufLen = 0;
+    const flush = async () => { if (!bufLen) return; const data = Buffer.concat(buf, bufLen); buf = []; bufLen = 0; await db.run("INSERT INTO file_chunks(file_id,idx,data) VALUES(?,?,?)", fid, idx++, data); };
+    try {
+      for await (const part of req) {
+        size += part.length; if (size > max) throw tooBig();
+        let p = part;
+        while (bufLen + p.length >= CHUNK) { const take = CHUNK - bufLen; buf.push(p.subarray(0, take)); bufLen += take; p = p.subarray(take); await flush(); }
+        if (p.length) { buf.push(p); bufLen += p.length; }
+      }
+      await flush();
+      if (!size) throw new HttpError(400, "Fayl bo‘sh");
+      await db.run("UPDATE files SET size=? WHERE id=?", size, fid);
+      return pubFile({ id: fid, key, name, mime, size });
+    } catch (e) {
+      await db.batch([["DELETE FROM file_chunks WHERE file_id=?", fid], ["DELETE FROM files WHERE id=?", fid]]).catch(() => {});
+      if (!req.complete) req.destroy();
+      throw e;
+    }
+  }, { auth: true, raw: true });
 
   // /files/:id/:key/:name — kalit tasodifiy va uzun, shuning uchun havolani bilganlargina ochadi.
   // Video ko‘rishda oldinga/orqaga o‘tish uchun Range so‘rovlari qo‘llab-quvvatlanadi.
   async function serveFile(req, res, pathname) {
     try {
       const m = pathname.match(/^\/files\/(\d+)\/([a-f0-9]{36})(?:\/[^/]*)?$/);
-      const f = m && await db.get("SELECT * FROM files WHERE id=? AND key=?", +m[1], m[2]);
-      const file = f && path.join(UPLOAD_DIR, `${f.id}-${f.key}`);
-      if (!f || !fs.existsSync(file)) { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }); return res.end("Fayl topilmadi"); }
+      const f = m && await db.get("SELECT * FROM files WHERE id=? AND key=? AND size>0", +m[1], m[2]);
+      if (!f) { res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*" }); return res.end("Fayl topilmadi"); }
       const inline = MEDIA_INLINE.test(f.mime);
-      const size = fs.statSync(file).size;
+      const size = f.size;
       const headers = {
         "Content-Type": inline ? f.mime : "application/octet-stream",
         "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(f.name)}`,
@@ -148,20 +151,28 @@ module.exports = function academy({ db, route, HttpError, bad, str, now, UPLOAD_
         "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
         "Content-Security-Policy": "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
       };
+      let start = 0, end = size - 1, code = 200;
       const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "");
       if (range && (range[1] || range[2])) {
-        let start = range[1] ? +range[1] : size - +range[2];
-        const end = range[1] && range[2] ? Math.min(+range[2], size - 1) : size - 1;
-        if (start < 0) start = 0;
+        start = range[1] ? +range[1] : Math.max(0, size - +range[2]);
+        end = range[1] && range[2] ? Math.min(+range[2], size - 1) : size - 1;
         if (start > end || start >= size) { res.writeHead(416, { "Content-Range": `bytes */${size}` }); return res.end(); }
-        res.writeHead(206, { ...headers, "Content-Range": `bytes ${start}-${end}/${size}`, "Content-Length": end - start + 1 });
-        if (req.method === "HEAD") return res.end();
-        return fs.createReadStream(file, { start, end }).pipe(res);
+        code = 206; headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
       }
-      res.writeHead(200, { ...headers, "Content-Length": size });
+      res.writeHead(code, { ...headers, "Content-Length": end - start + 1 });
       if (req.method === "HEAD") return res.end();
-      fs.createReadStream(file).pipe(res);
-    } catch (e) { console.error(e); if (!res.headersSent) { res.writeHead(500); res.end(); } }
+      // Faqat kerakli bo‘laklar bazadan o‘qiladi
+      for (let i = Math.floor(start / CHUNK); i <= Math.floor(end / CHUNK); i++) {
+        if (res.destroyed) return;
+        const row = await db.get("SELECT data FROM file_chunks WHERE file_id=? AND idx=?", f.id, i);
+        if (!row) break;
+        const b = Buffer.from(row.data);
+        const from = i * CHUNK;
+        const part = b.subarray(Math.max(0, start - from), Math.min(b.length, end - from + 1));
+        if (!res.write(part)) await new Promise((r) => res.once("drain", r));
+      }
+      res.end();
+    } catch (e) { console.error(e); if (!res.headersSent) { res.writeHead(500); res.end(); } else res.destroy(); }
   }
 
   /* ================= O‘QUVCHI ================= */

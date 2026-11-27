@@ -4,19 +4,17 @@ services:
   - type: web
     name: littlestar-api
     runtime: node
-    plan: starter            # yuklangan fayllar uchun doimiy disk faqat pullik rejada bor
+    plan: free               # Payme/Click ulangach "starter" ga o'tkazing (bepul reja 15 daqiqada uxlaydi)
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /api/health
-    disk:
-      name: uploads
-      mountPath: /var/data
-      sizeGB: 5
     envVars:
       - key: NODE_VERSION
         value: "22"
-      - key: UPLOAD_DIR
-        value: /var/data/uploads
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN
