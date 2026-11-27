@@ -5,6 +5,7 @@
 const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
+const zlib = require("node:zlib");
 const crypto = require("node:crypto");
 
 // .env faylini o‘qish (agar bo‘lsa). Serverda muhit o‘zgaruvchilari to‘g‘ridan-to‘g‘ri berilsa, bu kerak emas.
@@ -42,19 +43,27 @@ const DEFAULT_SETTINGS = {
   contact_text: "Obuna uchun Navoiy-Qorako‘l o‘quv markazi bilan bog‘laning: +998 99 381 99 99",
 };
 
+// Sozlamalar har so‘rovda bazadan o‘qilmasligi uchun 30 soniya xotirada saqlanadi
+let settingsCache = null, settingsAt = 0;
 async function getSettings() {
+  if (settingsCache && Date.now() - settingsAt < 30000) return settingsCache;
   const s = {};
   for (const r of await db.all("SELECT key,value FROM settings")) s[r.key] = r.value;
-  return {
+  const out = {
     free_mode: s.free_mode === "1",
     premium_sections: JSON.parse(s.premium_sections || "[]"),
     contact_text: s.contact_text || "",
   };
+  settingsCache = out; settingsAt = Date.now(); return out;
 }
 
 /* ======================= YORDAMCHI FUNKSIYALAR ======================= */
 const now = () => Math.floor(Date.now() / 1000);
 function hashPass(p, salt) { return crypto.scryptSync(p, salt, 64).toString("hex"); }
+// Asinxron variant: kirishda server boshqa so‘rovlarni to‘xtatib qo‘ymaydi
+const hashPassAsync = (p, salt) => new Promise((res, rej) => crypto.scrypt(p, salt, 64, (e, k) => (e ? rej(e) : res(k.toString("hex")))));
+const sameHex = (a, b) => { const x = Buffer.from(String(a), "hex"), y = Buffer.from(String(b), "hex"); return x.length === y.length && x.length > 0 && crypto.timingSafeEqual(x, y); };
+const SESSION_DAYS = 90; // shu muddatdan keyin qayta kirish so‘raladi
 function normPhone(p) {
   let d = String(p || "").replace(/\D/g, "");
   if (d.length === 9) d = "998" + d;
@@ -82,6 +91,11 @@ function hasAccess(s, account, section) {
 
 // Oddiy so‘rov cheklovi (kirish/ro‘yxatdan o‘tish uchun)
 const hits = new Map();
+// Faqat tekshiradi (hisobga qo‘shmaydi): chegaradan oshgan bo‘lsa, to‘g‘ri parol ham qabul qilinmaydi
+function checkLimit(key, max, windowSec) {
+  const t = now(); const h = (hits.get(key) || []).filter((x) => x > t - windowSec);
+  if (h.length >= max) throw new HttpError(429, "Juda ko‘p noto‘g‘ri urinish. Bir soatdan keyin qayta urinib ko‘ring.");
+}
 function rateLimit(key, max = 20, windowSec = 600) {
   const t = now(); const h = (hits.get(key) || []).filter((x) => x > t - windowSec);
   if (h.length >= max) throw new HttpError(429, "Juda ko‘p urinish. Birozdan keyin qayta urinib ko‘ring.");
@@ -129,7 +143,7 @@ route("POST", "/api/auth/register", async ({ body, ip }) => {
   const pass = String(body.password || ""); if (pass.length < 6) bad("Parol kamida 6 belgidan iborat bo‘lsin");
   if (await db.get("SELECT 1 x FROM accounts WHERE phone=?", phone)) bad("Bu raqam allaqachon ro‘yxatdan o‘tgan. Kirish bo‘limidan foydalaning.");
   const salt = crypto.randomBytes(16).toString("hex");
-  const r = await db.run("INSERT INTO accounts(phone,pass_hash,salt,parent_name,created_at) VALUES(?,?,?,?,?)", phone, hashPass(pass, salt), salt, str(body.parent_name, 60), now());
+  const r = await db.run("INSERT INTO accounts(phone,pass_hash,salt,parent_name,created_at) VALUES(?,?,?,?,?)", phone, await hashPassAsync(pass, salt), salt, str(body.parent_name, 60), now());
   const a = await db.get("SELECT * FROM accounts WHERE id=?", r.lastInsertRowid);
   return { token: await newSession(a.id), account: publicAccount(a) };
 });
@@ -138,9 +152,16 @@ route("POST", "/api/auth/login", async ({ body, ip }) => {
   const login = String(body.phone || body.login || "").trim();
   const email = login.includes("@") ? login.toLowerCase() : null;
   const phone = email ? null : normPhone(login);
-  rateLimit("login:" + ip + ":" + (email || phone), 10); rateLimit("loginip:" + ip, 300); rateLimit("loginacc:" + (email || phone), 30, 3600);
+  const who = email || phone || "?";
+  rateLimit("login:" + ip + ":" + who, 10); rateLimit("loginip:" + ip, 300); rateLimit("loginacc:" + who, 30, 3600);
   const a = email ? await db.get("SELECT * FROM accounts WHERE email=?", email) : phone && await db.get("SELECT * FROM accounts WHERE phone=?", phone);
-  if (!a || hashPass(String(body.password || ""), a.salt) !== a.pass_hash) throw new HttpError(401, "Telefon raqam yoki parol noto‘g‘ri");
+  if (a && a.role !== "user") checkLimit("loginadm:" + who, 10, 3600); // admin/o‘qituvchi: soatiga ko‘pi bilan 10 xato urinish
+  // Akkaunt bo‘lmasa ham parol hisoblanadi: javob vaqtidan raqam ro‘yxatdan o‘tganini bilib bo‘lmaydi
+  const h = await hashPassAsync(String(body.password || ""), a ? a.salt : "0000000000000000");
+  if (!a || !sameHex(h, a.pass_hash)) {
+    if (a && a.role !== "user") { try { rateLimit("loginadm:" + who, 10, 3600); } catch {} }
+    throw new HttpError(401, "Telefon raqam yoki parol noto‘g‘ri");
+  }
   return { token: await newSession(a.id), account: publicAccount(a) };
 });
 route("POST", "/api/auth/logout", async ({ token }) => { await db.run("DELETE FROM sessions WHERE token=?", token); return { ok: true }; }, { auth: true });
@@ -276,6 +297,7 @@ route("PUT", "/api/admin/settings", async ({ body }) => {
   if (Array.isArray(body.premium_sections)) st.push([SET, "premium_sections", JSON.stringify(body.premium_sections.filter((s) => SECTIONS[s]))]);
   if ("contact_text" in body) st.push([SET, "contact_text", str(body.contact_text, 300)]);
   if (st.length) await db.batch(st);
+  settingsCache = null;
   return getSettings();
 }, A);
 
@@ -369,9 +391,24 @@ function cors(req, res) {
   res.setHeader("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
   res.setHeader("Access-Control-Max-Age", "86400");
 }
+// Mijoz IP manzili: proksi (Render) qo‘shgan eng oxirgi qiymat olinadi — foydalanuvchi o‘zi yozgan
+// soxta X-Forwarded-For bilan so‘rovlar chegarasini aylanib o‘ta olmaydi
+function clientIp(req) {
+  const list = String(req.headers["x-forwarded-for"] || "").split(",").map((x) => x.trim()).filter(Boolean);
+  return list.length ? list[list.length - 1] : req.socket.remoteAddress;
+}
+// Barcha API javoblari uchun xavfsizlik sarlavhalari
+const SECURITY_HEADERS = { "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer", "Cross-Origin-Opener-Policy": "same-origin" };
+// JSON javob; 1 KB dan kattasi gzip bilan siqiladi (masalan, 30 savollik test ~4 marta kichrayadi)
 function send(res, code, obj) {
-  const body = JSON.stringify(obj);
-  res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }); res.end(body);
+  const body = Buffer.from(JSON.stringify(obj));
+  const headers = { ...SECURITY_HEADERS, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", Vary: "Origin, Accept-Encoding" };
+  const ae = String((res.req && res.req.headers["accept-encoding"]) || "");
+  if (body.length > 1024 && /\bgzip\b/.test(ae)) {
+    const z = zlib.gzipSync(body, { level: 6 });
+    res.writeHead(code, { ...headers, "Content-Encoding": "gzip", "Content-Length": z.length }); return res.end(z);
+  }
+  res.writeHead(code, { ...headers, "Content-Length": body.length }); res.end(body);
 }
 
 /* ---- Saytning statik fayllari ---- */
@@ -411,12 +448,12 @@ const server = http.createServer(async (req, res) => {
     const auth = req.headers.authorization || "";
     const token = /^Bearer\s+/i.test(auth) ? auth.replace(/^Bearer\s+/i, "") : null;
     let account = null;
-    if (token && (r.auth || r.optionalAuth)) account = (await db.get("SELECT a.* FROM sessions s JOIN accounts a ON a.id=s.account_id WHERE s.token=?", token)) || null;
+    if (token && (r.auth || r.optionalAuth)) account = (await db.get("SELECT a.* FROM sessions s JOIN accounts a ON a.id=s.account_id WHERE s.token=? AND s.created_at>?", token, now() - SESSION_DAYS * 86400)) || null;
     if (r.auth && !account) throw new HttpError(401, "Iltimos, akkauntga kiring");
     if (r.admin && account.role !== "admin") throw new HttpError(403, "Faqat admin uchun");
     if (r.teacher && !ACADEMY.isTeacher(account)) throw new HttpError(403, "Faqat o‘qituvchi uchun");
     const body = r.raw ? {} : ["POST", "PUT"].includes(req.method) ? await readBody(req) : {};
-    const ip = (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.socket.remoteAddress;
+    const ip = clientIp(req);
     const out = await r.handler({ req, body, params, query: Object.fromEntries(url.searchParams), account, token, ip });
     send(res, 200, out);
   } catch (e) {
@@ -461,6 +498,7 @@ async function init() {
   }
   await ACADEMY.init();
   await ensureAdmin();
+  await db.run("DELETE FROM sessions WHERE created_at<?", now() - SESSION_DAYS * 86400);
 }
 
 async function main() {

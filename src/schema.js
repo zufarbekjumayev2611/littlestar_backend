@@ -75,4 +75,10 @@ CREATE TABLE IF NOT EXISTS payments(
   id INTEGER PRIMARY KEY, provider TEXT NOT NULL, ext_id TEXT NOT NULL, order_id INTEGER NOT NULL,
   amount INTEGER NOT NULL, state INTEGER NOT NULL, create_time INTEGER NOT NULL, perform_time INTEGER DEFAULT 0,
   cancel_time INTEGER DEFAULT 0, reason INTEGER, ptime INTEGER DEFAULT 0, UNIQUE(provider, ext_id));
+CREATE INDEX IF NOT EXISTS idx_enroll_child ON enrollments(child_id);
+CREATE INDEX IF NOT EXISTS idx_sub_child ON submissions(child_id);
+CREATE INDEX IF NOT EXISTS idx_orders_course ON orders(course_id, status);
+CREATE INDEX IF NOT EXISTS idx_orders_account ON orders(account_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order ON payments(order_id, provider);
+CREATE INDEX IF NOT EXISTS idx_sessions_created ON sessions(created_at);
 `;

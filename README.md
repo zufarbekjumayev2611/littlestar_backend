@@ -106,6 +106,18 @@ DNS: `api.littlestar.uz` uchun A-yozuvni VPS IP manziliga yo‘naltiring. Tekshi
 **Yangilash:** `git pull && npm ci --omit=dev && sudo systemctl restart littlestar-api`.
 **Zaxira:** baza va yuklangan fayllar Turso’da turadi, ularning zaxirasini Turso o‘zi saqlaydi.
 
+## Tezlik
+- **Render va Turso bitta hududda bo‘lsin.** Har bir so‘rovda bazaga bir necha murojaat bo‘ladi. Render AQSh’da, Turso esa Yevropada bo‘lsa, har bir murojaat okean orqali boradi va sayt sekinlashadi. Render’da **Frankfurt** tanlansa, Turso bazasi ham Yevropada (masalan `aws-eu-central-1`) yaratilishi kerak. Render hududini keyin o‘zgartirib bo‘lmaydi, buning uchun yangi xizmat ochiladi.
+- **Bepul reja uxlab qolmasligi uchun** [UptimeRobot](https://uptimerobot.com) (bepul) da `https://<render-manzil>/api/health` ga har 5 daqiqada so‘rov yuboradigan monitor qo‘shing. Sayt ochilganda ham server uyg‘otiladi (`config.js` buni avtomatik qiladi).
+- API javoblari 1 KB dan katta bo‘lsa, gzip bilan siqiladi. Sozlamalar 30 soniya xotirada saqlanadi. Tez-tez ishlatiladigan ustunlarga indekslar qo‘yilgan.
+
+## Xavfsizlik
+- Parollar `scrypt` bilan shifrlanadi va vaqt bo‘yicha xavfsiz solishtiriladi. Kirish sessiyasi 90 kundan keyin tugaydi.
+- Kirish urinishlari cheklangan. **Admin va o‘qituvchi uchun soatiga ko‘pi bilan 10 ta xato urinishga ruxsat bor.** Chegaraga yetganda bir soat davomida to‘g‘ri parol ham qabul qilinmaydi. Soxta `X-Forwarded-For` sarlavhasi bilan bu cheklovni aylanib o‘tib bo‘lmaydi.
+- Payme kaliti va Click imzosi vaqt bo‘yicha xavfsiz tekshiriladi. Barcha SQL so‘rovlari parametrli. Fayl havolalarida tasodifiy 36 belgili kalit bor.
+- API javoblarida `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` sarlavhalari bor. `CORS_ORIGINS` faqat o‘z saytingiz bilan cheklanadi.
+- **Admin paroli kamida 12 belgili bo‘lsin.** Uni faqat Render → Environment’da saqlang.
+
 ## 5. To‘lov tizimi (Payme va Click)
 O‘quvchi saytda “To‘lash” tugmasini bosadi va Payme yoki Click sahifasiga o‘tadi. To‘lov tasdiqlangach, server o‘quvchini kursga **avtomatik** qo‘shadi.
 | | Payme (business.payme.uz) | Click (merchant.click.uz) |

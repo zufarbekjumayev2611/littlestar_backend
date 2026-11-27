@@ -603,7 +603,7 @@ module.exports = function academy({ db, route, HttpError, bad, str, now, PUBLIC_
       const raw = await readRaw(req);
       const auth = String(req.headers.authorization || "");
       const cred = auth.startsWith("Basic ") ? Buffer.from(auth.slice(6), "base64").toString("utf8") : "";
-      if (!PAY.payme.key || cred.slice(cred.indexOf(":") + 1) !== PAY.payme.key) throw pmErr(-32504, "Ruxsat yo‘q", "Недостаточно привилегий", "Insufficient privileges");
+      if (!PAY.payme.key || !safeEq(cred.slice(cred.indexOf(":") + 1), PAY.payme.key)) throw pmErr(-32504, "Ruxsat yo‘q", "Недостаточно привилегий", "Insufficient privileges");
       try { msg = JSON.parse(raw); } catch { throw pmErr(-32700, "JSON xato", "Ошибка парсинга JSON", "Parse error"); }
       const fn = Object.prototype.hasOwnProperty.call(PM, msg.method) && PM[msg.method];
       if (!fn) throw pmErr(-32601, "Metod topilmadi", "Метод не найден", "Method not found");
@@ -616,13 +616,15 @@ module.exports = function academy({ db, route, HttpError, bad, str, now, PUBLIC_
 
   /* ---- Click SHOP API. Kabinetda: Prepare URL https://API_MANZIL/api/pay/click/prepare, Complete URL https://API_MANZIL/api/pay/click/complete ---- */
   const md5 = (x) => crypto.createHash("md5").update(x).digest("hex");
+  // Kalit/imzoni vaqt bo‘yicha xavfsiz solishtirish (javob vaqtidan kalitni taxmin qilib bo‘lmaydi)
+  function safeEq(a, b) { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
   async function clickHandle(req, action) {
     const p = Object.fromEntries(new URLSearchParams(await readRaw(req)));
     const base = { click_trans_id: p.click_trans_id, merchant_trans_id: p.merchant_trans_id };
     const out = (error, error_note, extra = {}) => ({ ...base, ...extra, error, error_note });
     if (!enabled().click) return out(-8, "Click ulanmagan");
     const sign = md5(`${p.click_trans_id}${p.service_id}${PAY.click.secret}${p.merchant_trans_id}${action === 1 ? p.merchant_prepare_id ?? "" : ""}${p.amount}${p.action}${p.sign_time}`);
-    if (sign !== String(p.sign_string || "").toLowerCase() || String(p.service_id) !== String(PAY.click.service)) return out(-1, "SIGN CHECK FAILED!");
+    if (!safeEq(sign, String(p.sign_string || "").toLowerCase()) || String(p.service_id) !== String(PAY.click.service)) return out(-1, "SIGN CHECK FAILED!");
     if (+p.action !== action) return out(-3, "Action not found");
     const o = await db.get("SELECT * FROM orders WHERE id=?", +p.merchant_trans_id);
     if (!o) return out(-5, "Order does not exist");
