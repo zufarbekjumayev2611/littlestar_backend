@@ -426,27 +426,27 @@ const server = http.createServer(async (req, res) => {
 });
 
 /* ======================= ISHGA TUSHIRISH ======================= */
-// Admin akkaunti Environment’dagi ADMIN_EMAIL va ADMIN_PASSWORD dan yaratiladi (parol kodda/GitHub’da saqlanmaydi).
-// Parol o‘zgartirilsa, keyingi ishga tushishda yangilanadi.
+// Admin akkaunti Environment’dagi ADMIN_PHONE va ADMIN_PASSWORD dan yaratiladi (parol kodda/GitHub’da saqlanmaydi).
+// Shu telefon raqam va parol bilan kirgan odam admin bo‘ladi. Raqam saytda avval ro‘yxatdan o‘tgan bo‘lsa,
+// o‘sha akkaunt admin qilinadi. Parol o‘zgartirilsa, keyingi ishga tushishda yangilanadi.
 async function ensureAdmin() {
-  const email = String(process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+  const raw = String(process.env.ADMIN_PHONE || "").trim();
   const pass = String(process.env.ADMIN_PASSWORD || "");
-  if (!email || !pass) return;
-  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { console.warn("ADMIN_EMAIL noto‘g‘ri:", email); return; }
-  const ex = await db.get("SELECT * FROM accounts WHERE email=?", email);
+  if (!raw || !pass) return;
+  const phone = normPhone(raw);
+  if (!phone) { console.warn("ADMIN_PHONE noto‘g‘ri (masalan: 998901234567):", raw); return; }
+  const ex = await db.get("SELECT * FROM accounts WHERE phone=?", phone);
   if (ex) {
     if (ex.role !== "admin" || hashPass(pass, ex.salt) !== ex.pass_hash) {
       const salt = crypto.randomBytes(16).toString("hex");
       await db.batch([["UPDATE accounts SET role='admin', pass_hash=?, salt=? WHERE id=?", hashPass(pass, salt), salt, ex.id], ["DELETE FROM sessions WHERE account_id=?", ex.id]]);
-      console.log("Admin yangilandi:", email);
+      console.log("Admin yangilandi: +" + phone);
     }
     return;
   }
   const salt = crypto.randomBytes(16).toString("hex");
-  const ins = (phone) => db.run("INSERT INTO accounts(phone,email,pass_hash,salt,parent_name,role,created_at) VALUES(?,?,?,?,?,?,?)", phone, email, hashPass(pass, salt), salt, "Admin", "admin", now());
-  // Eski bazada telefon majburiy bo‘lsa, telefon o‘rniga belgi qo‘yiladi (kirish email orqali)
-  try { await ins(null); } catch (e) { if (!/NOT NULL/i.test(e.message)) throw e; await ins("admin:" + email); }
-  console.log("Admin yaratildi:", email);
+  await db.run("INSERT INTO accounts(phone,pass_hash,salt,parent_name,role,created_at) VALUES(?,?,?,?,?,?)", phone, hashPass(pass, salt), salt, "Admin", "admin", now());
+  console.log("Admin yaratildi: +" + phone);
 }
 
 async function init() {

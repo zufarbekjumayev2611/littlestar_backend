@@ -51,7 +51,7 @@ npm run create-admin -- 998901234567 KuchliParol   # birinchi admin
 | `PUBLIC_URL` | API’ning internetdagi manzili, masalan `https://api.littlestar.uz`. Yuklangan fayl havolalari shu bilan boshlanadi |
 | `SITE_URL` | Sayt manzili, masalan `https://littlestar.uz`. To‘lovdan keyin o‘quvchi shu manzilga qaytadi |
 | `CORS_ORIGINS` | API’ga murojaat qilishiga ruxsat berilgan saytlar, vergul bilan ajratiladi: `https://littlestar.uz,https://www.littlestar.uz` |
-| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | Admin akkaunti. Server ishga tushganda yaratiladi yoki yangilanadi. Admin panelga shu email va parol bilan kiriladi |
+| `ADMIN_PHONE`, `ADMIN_PASSWORD` | Admin akkaunti. Shu telefon raqam va parol bilan kirgan odam admin bo‘ladi. Server ishga tushganda akkaunt yaratiladi yoki yangilanadi |
 | `MAX_UPLOAD_MB` | O‘qituvchi yuklaydigan eng katta fayl hajmi, MB (standart 100) |
 | `PAYME_MERCHANT_ID`, `PAYME_KEY`, `PAYME_TEST` | Payme. Sinovda `PAYME_TEST=1`, haqiqiy to‘lovda `0` |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | Click |
@@ -78,7 +78,7 @@ Qo‘lda sozlansa: **New → Web Service** tanlanadi (Background Worker emas):
 | `FRONTEND_BRANCH` | `claude/lucid-newton-48ghoe` (`main` ga birlashtirilgach `main`) | frontend reposidagi branch |
 | `TURSO_DATABASE_URL` | `libsql://....turso.io` | Turso paneli → baza → **Connect** (yoki `turso db show <baza> --url`) |
 | `TURSO_AUTH_TOKEN` | uzun token | Turso paneli → baza → **Connect → Generate token** (yoki `turso db tokens create <baza>`) |
-| `ADMIN_EMAIL` | admin emaili | o‘zingiz tanlaysiz |
+| `ADMIN_PHONE` | admin telefon raqami, masalan `998901234567` | o‘zingiz tanlaysiz |
 | `ADMIN_PASSWORD` | admin paroli | o‘zingiz tanlaysiz (kamida 10 belgi tavsiya etiladi) |
 | `PAYME_MERCHANT_ID`, `PAYME_KEY` | Payme kassa ID va kaliti | business.payme.uz → kassa → sozlamalar (shartnomadan keyin) |
 | `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | Click ma’lumotlari | merchant.click.uz (shartnomadan keyin) |
