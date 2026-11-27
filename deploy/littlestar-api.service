@@ -1,0 +1,18 @@
+# /etc/systemd/system/littlestar-api.service
+# O‘rnatish: sudo cp deploy/littlestar-api.service /etc/systemd/system/ && sudo systemctl enable --now littlestar-api
+[Unit]
+Description=Little Star API (backend)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=littlestar
+WorkingDirectory=/opt/littlestar-backend
+# Sozlamalar /opt/littlestar-backend/.env faylidan o‘qiladi (chmod 600 qiling)
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

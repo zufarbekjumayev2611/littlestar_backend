@@ -1,0 +1,16 @@
+{
+  "name": "littlestar-backend",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Little Star — Navoiy-Qorako‘l o‘quv markazi platformasining backend (API) qismi. Ma’lumotlar bazasi: Turso (libSQL).",
+  "main": "src/server.js",
+  "engines": { "node": ">=20.12" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "create-admin": "node src/server.js --create-admin"
+  },
+  "dependencies": {
+    "@libsql/client": "0.17.4"
+  }
+}
