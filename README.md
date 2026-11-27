@@ -4,8 +4,10 @@ Navoiy-Qorako‘l o‘quv markazining **Little Star** ta’limiy platformasi uch
 Frontend (sayt) alohida repoda: [`littlestar`](https://github.com/zufarbekjumayev2611/littlestar).
 
 ```
- Sayt (littlestar.uz)  ──HTTPS──►  API (api.littlestar.uz, shu repo)  ──►  Turso (ma’lumotlar bazasi)
-                                          (yuklangan fayllar ham Turso’da saqlanadi)
+ Brauzer ──HTTPS──►  Render: littlestar (shu repo)  ──►  Turso (baza + yuklangan fayllar)
+                       ├─ /            sayt (build paytida littlestar reposidan olinadi)
+                       ├─ /admin       admin va o‘qituvchi paneli
+                       └─ /api/...     API
 ```
 
 - **Node.js 20.12+**, bitta tashqi kutubxona: [`@libsql/client`](https://www.npmjs.com/package/@libsql/client) (Turso).
@@ -56,28 +58,34 @@ npm run create-admin -- 998901234567 KuchliParol   # birinchi admin
 
 > ⚠️ `.env` fayli `.gitignore` da turibdi va GitHub’ga **chiqmaydi**. Kalitlarni hech qachon kodga, GitHub’ga yoki chatga yozmang.
 
-## 4a. Render’ga joylash (tavsiya)
-Render’da **Web Service** tanlanadi. Background Worker emas, chunki u tashqaridan keladigan so‘rovlarni qabul qilmaydi.
+## 4a. Render’ga joylash (tavsiya) — sayt va API bitta xizmatda
+Build paytida backend saytni frontend reposidan (`littlestar`) o‘zi olib keladi (`scripts/fetch-frontend.sh`) va uni o‘zi ko‘rsatadi. Natijada **bitta manzil** bo‘ladi: `https://littlestar.onrender.com` (sayt), `/admin` (panel), `/api/...` (API). CORS yoki `config.js` ni sozlash kerak emas.
 
-| Render maydoni | Qiymat |
+**Eng oson yo‘l:** Render → **New → Blueprint** → `littlestar_backend` reposini tanlang. Barcha sozlamalar `render.yaml` dan olinadi, Render faqat maxfiy qiymatlarni so‘raydi.
+
+Qo‘lda sozlansa: **New → Web Service** tanlanadi (Background Worker emas):
+| Maydon | Qiymat |
 |---|---|
-| Language | **Node** |
-| Build Command | `npm ci` — `package.json` dagi kutubxonalarni o‘rnatadi (Python’dagi `pip install -r requirements.txt` ning o‘rnini bosadi) |
+| Language | Node |
+| Build Command | `npm run build` (kutubxonalarni o‘rnatadi va saytni oladi) |
 | Start Command | `npm start` |
 | Health Check Path | `/api/health` |
 
-**Environment** bo‘limiga quyidagilarni kiriting:
-- `NODE_VERSION=22`
-- `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`
-- `ADMIN_EMAIL`, `ADMIN_PASSWORD`
-- `PUBLIC_URL`, `SITE_URL`, `CORS_ORIGINS`
-- kerak bo‘lsa `PAYME_*` va `CLICK_*`
+**Environment:**
+| Key | Qiymat | Qayerdan olinadi |
+|---|---|---|
+| `NODE_VERSION` | `22` | — |
+| `FRONTEND_BRANCH` | `claude/lucid-newton-48ghoe` (`main` ga birlashtirilgach `main`) | frontend reposidagi branch |
+| `TURSO_DATABASE_URL` | `libsql://....turso.io` | Turso paneli → baza → **Connect** (yoki `turso db show <baza> --url`) |
+| `TURSO_AUTH_TOKEN` | uzun token | Turso paneli → baza → **Connect → Generate token** (yoki `turso db tokens create <baza>`) |
+| `ADMIN_EMAIL` | admin emaili | o‘zingiz tanlaysiz |
+| `ADMIN_PASSWORD` | admin paroli | o‘zingiz tanlaysiz (kamida 10 belgi tavsiya etiladi) |
+| `PAYME_MERCHANT_ID`, `PAYME_KEY` | Payme kassa ID va kaliti | business.payme.uz → kassa → sozlamalar (shartnomadan keyin) |
+| `CLICK_SERVICE_ID`, `CLICK_MERCHANT_ID`, `CLICK_SECRET_KEY` | Click ma’lumotlari | merchant.click.uz (shartnomadan keyin) |
 
-`PORT`ni **yozmang**, uni Render o‘zi beradi. Serverda `.env` fayli kerak emas.
+`PORT`ni yozmang, uni Render o‘zi beradi. Fayllar Turso’da saqlanadi, shuning uchun disk kerak emas. Bepul reja 15 daqiqa so‘rov bo‘lmasa uxlab qoladi, shuning uchun Payme yoki Click ulangach pullik rejaga o‘ting.
 
-Fayllar Turso’da saqlanadi, shuning uchun **disk kerak emas** va bepul rejada ham fayllar yo‘qolmaydi. Bepul reja 15 daqiqa so‘rov bo‘lmasa uxlab qoladi. Payme yoki Click ulangach, pullik rejaga o‘ting, aks holda ularning so‘rovlari javobsiz qolishi mumkin.
-
-`render.yaml` bor, shuning uchun “New → Blueprint” orqali ulasangiz, bu sozlamalar avtomatik olinadi.
+**Sayt yangilansa** (frontend reposiga push qilinsa), Render’da **Manual Deploy → Deploy latest commit** tugmasini bosing, shunda yangi sayt olinadi.
 
 ## 4b. Serverga (VPS) o‘rnatish
 Ubuntu VPS misolida:

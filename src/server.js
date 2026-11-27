@@ -4,6 +4,7 @@
 "use strict";
 const http = require("node:http");
 const path = require("node:path");
+const fs = require("node:fs");
 const crypto = require("node:crypto");
 
 // .env faylini o‘qish (agar bo‘lsa). Serverda muhit o‘zgaruvchilari to‘g‘ridan-to‘g‘ri berilsa, bu kerak emas.
@@ -15,9 +16,12 @@ const SCHEMA = require("./schema.js");
 const ROOT = path.resolve(__dirname, "..");
 const PORT = +(process.env.PORT || 3000);
 const DB_URL = process.env.TURSO_DATABASE_URL || "file:" + path.join(ROOT, "data", "littlestar.db");
-if (DB_URL.startsWith("file:")) require("node:fs").mkdirSync(path.dirname(DB_URL.slice(5)), { recursive: true });
+if (DB_URL.startsWith("file:")) fs.mkdirSync(path.dirname(DB_URL.slice(5)), { recursive: true });
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, ""); // backend manzili, masalan https://api.littlestar.uz
 // Frontend joylashgan domen(lar). Vergul bilan: https://littlestar.uz,https://www.littlestar.uz  ("*" — hammaga ruxsat)
+// Sayt (frontend) fayllari: build paytida frontend reposidan olinadi (scripts/fetch-frontend.sh).
+// Shunda sayt va API bitta manzilda ishlaydi — CORS va alohida sozlash kerak emas.
+const FRONTEND_DIR = path.resolve(ROOT, process.env.FRONTEND_DIR || "frontend/public");
 const CORS_ORIGINS = (process.env.CORS_ORIGINS || "*").split(",").map((s) => s.trim().replace(/\/$/, "")).filter(Boolean);
 
 /* ======================= MA'LUMOTLAR BAZASI ======================= */
@@ -370,12 +374,36 @@ function send(res, code, obj) {
   res.writeHead(code, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }); res.end(body);
 }
 
+/* ---- Saytning statik fayllari ---- */
+const MIME = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json", ".webmanifest": "application/manifest+json", ".png": "image/png", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".txt": "text/plain; charset=utf-8" };
+const hasFrontend = () => fs.existsSync(path.join(FRONTEND_DIR, "index.html"));
+function serveStatic(req, res, pathname) {
+  let p; try { p = decodeURIComponent(pathname); } catch { p = "/"; }
+  if (p === "/" || p === "") p = "/index.html";
+  if (p === "/admin") p = "/admin.html";
+  // Sayt va API bitta manzilda: API manzili bo‘sh (shu domen)
+  if (p === "/config.js") { res.writeHead(200, { "Content-Type": MIME[".js"], "Cache-Control": "no-cache" }); return res.end('window.LS_API = "";\n'); }
+  const file = path.normalize(path.join(FRONTEND_DIR, p));
+  if (!file.startsWith(FRONTEND_DIR + path.sep)) { res.writeHead(403); return res.end(); }
+  fs.stat(file, (err, st) => {
+    const target = !err && st.isFile() ? file : path.join(FRONTEND_DIR, "index.html");
+    const ext = path.extname(target);
+    const noCache = [".html", ".webmanifest", ".js"].includes(ext);
+    res.writeHead(200, { "Content-Type": MIME[ext] || "application/octet-stream", "Cache-Control": noCache ? "no-cache" : "public, max-age=604800", "X-Content-Type-Options": "nosniff" });
+    if (req.method === "HEAD") return res.end();
+    fs.createReadStream(target).pipe(res);
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://x");
   cors(req, res);
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
   if (url.pathname.startsWith("/files/") && (req.method === "GET" || req.method === "HEAD")) return ACADEMY.serveFile(req, res, url.pathname);
-  if (url.pathname === "/") return send(res, 200, { name: "Little Star API", ok: true });
+  if (!url.pathname.startsWith("/api/") && (req.method === "GET" || req.method === "HEAD")) {
+    if (hasFrontend()) return serveStatic(req, res, url.pathname);
+    if (url.pathname === "/") return send(res, 200, { name: "Little Star API", ok: true });
+  }
   try {
     const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
     if (!r) throw new HttpError(404, "Topilmadi");

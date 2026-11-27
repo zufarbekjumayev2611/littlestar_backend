@@ -1,36 +1,38 @@
-# Render Blueprint: Render panelida "New → Blueprint" orqali shu repo tanlansa, sozlamalar avtomatik olinadi.
-# Qiymati bo'sh (sync: false) o'zgaruvchilarni Render o'zi so'raydi — ular faqat Render'da saqlanadi, GitHub'da emas.
+# Render Blueprint — sayt + API bitta xizmatda.
+# Render: New → Blueprint → shu repo (littlestar_backend) tanlanadi. Qolgan hammasi shu fayldan olinadi.
+# "sync: false" qiymatlarni Render so'raydi — ular faqat Render'da saqlanadi (repo ochiq, shuning uchun bu yerga yozilmaydi).
 services:
   - type: web
-    name: littlestar-api
+    name: littlestar
     runtime: node
-    plan: free               # Payme/Click ulangach "starter" ga o'tkazing (bepul reja 15 daqiqada uxlaydi)
-    buildCommand: npm ci
+    plan: free                 # Payme/Click ulangach "starter" ga o'tkazing (bepul reja 15 daqiqada uxlaydi)
+    buildCommand: npm run build
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
+      # --- tayyor qiymatlar ---
       - key: NODE_VERSION
         value: "22"
-      - key: ADMIN_EMAIL
-        sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
+      - key: FRONTEND_BRANCH       # sayt shu branchdan olinadi; main ga birlashtirilgach "main" qiling
+        value: claude/lucid-newton-48ghoe
+      - key: MAX_UPLOAD_MB
+        value: "100"
+      - key: PAYME_TEST
+        value: "1"
+      # --- Render so'raydigan maxfiy qiymatlar ---
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN
         sync: false
-      - key: PUBLIC_URL
+      - key: ADMIN_EMAIL
         sync: false
-      - key: SITE_URL
+      - key: ADMIN_PASSWORD
         sync: false
-      - key: CORS_ORIGINS
-        sync: false
+      # --- to'lov: shartnoma tuzilgach to'ldiriladi (bo'sh qolsa, saytda "naqd to'lov" yozuvi chiqadi) ---
       - key: PAYME_MERCHANT_ID
         sync: false
       - key: PAYME_KEY
         sync: false
-      - key: PAYME_TEST
-        value: "1"
       - key: CLICK_SERVICE_ID
         sync: false
       - key: CLICK_MERCHANT_ID
