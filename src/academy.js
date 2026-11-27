@@ -143,6 +143,9 @@ module.exports = function academy({ db, route, HttpError, bad, str, now, UPLOAD_
         "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(f.name)}`,
         "Accept-Ranges": "bytes", "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff",
         "Cross-Origin-Resource-Policy": "cross-origin",
+        // Havola maxfiy kalitga ega; brauzer keshi to‘g‘ri ishlashi uchun CORS ruxsati har doim beriladi
+        // (aks holda o‘qituvchi rasm ustida belgilaganda keshdagi rasm bloklanadi)
+        "Access-Control-Allow-Origin": "*", "Access-Control-Expose-Headers": "Content-Range, Content-Length, Accept-Ranges",
         "Content-Security-Policy": "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox",
       };
       const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || "");
